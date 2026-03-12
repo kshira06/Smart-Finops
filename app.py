@@ -5,6 +5,23 @@ import hashlib
 import json
 from datetime import datetime
 
+# BLOCKCHAIN INTEGRATION ----------------------------------------------
+
+import json
+from web3 import Web3
+
+w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+
+contract_address = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+
+with open("AuditAnchorABI.json") as f:
+    abi = json.load(f)
+
+contract = w3.eth.contract(address=contract_address, abi=abi)
+print("Blockchain connected:", w3.is_connected())
+
+# ----------------------------------------------------------------------
+
 app = Flask(__name__)
 CORS(app)
 
@@ -270,6 +287,18 @@ def approve_transaction():
 
     current_hash = generate_hash(log_data, previous_hash)
 
+    # STORE HASH ON ETHEREUM BLOCKCHAIN
+    account = w3.eth.accounts[0]
+
+    tx_hash = contract.functions.storeAudit(
+        transaction_id,
+        current_hash
+    ).transact({"from": account})
+
+    w3.eth.wait_for_transaction_receipt(tx_hash)
+
+    print("Stored on blockchain:", tx_hash.hex())
+
     cur.execute("""
         INSERT INTO audit_logs
         (action, data, previous_hash, current_hash, timestamp)
@@ -371,6 +400,7 @@ def create_department():
 
     return jsonify({"message": "Department created successfully"})
 
+
 # BUDGET API
 
 @app.route("/allocate_budget", methods=["POST"])
@@ -419,6 +449,43 @@ def create_user():
     conn.close()
 
     return jsonify({"message": "User created successfully"})
+
+# DELETE USERS
+
+@app.route("/delete_user/<int:user_id>", methods=["DELETE"])
+def delete_user(user_id):
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "message": f"User {user_id} deleted successfully"
+    })
+
+# BLOCKCHAIN RECORDS -----------------------------
+
+@app.route("/blockchain_records")
+def blockchain_records():
+
+    total = contract.functions.totalRecords().call()
+
+    records = []
+
+    for i in range(total):
+        r = contract.functions.getRecord(i).call()
+
+        records.append({
+            "transaction_id": r[0],
+            "hash": r[1],
+            "timestamp": r[2]
+        })
+
+    return jsonify(records)
 
 # TAMPERING
 
